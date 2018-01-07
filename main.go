@@ -1,29 +1,41 @@
 package main
 
 import (
-	"io/ioutil"
 	"encoding/json"
 	"image"
-	"strings"
-	"errors"
-	"image/jpeg"
+	_ "image/png"
+	"io/ioutil"
 	"os"
-	"image/png"
+	"github.com/patrickmn/go-cache"
+	"time"
+	"github.com/golang/freetype/truetype"
+	"golang.org/x/image/font"
+	"image/draw"
+	"image/color"
+	"golang.org/x/image/math/fixed"
+	"github.com/davecgh/go-spew/spew"
+	"log"
 )
 
 type Generator struct {
-	Name string
+	Name   string
 	Labels []Label
 }
 type Label struct {
-	X1, X2, Y1, Y2 uint
-	FontFamily string
+	Point image.Point
+	Size float64
+	Color color.RGBA
+	FontFamily     string
 }
+
+var cac *cache.Cache
 
 var generators map[string]Generator
 
 func main() {
 	generators = make(map[string]Generator)
+
+	cac = cache.New(5*time.Minute, 10*time.Minute)
 
 	//Start with jsons
 	{
@@ -31,8 +43,8 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		for _,x := range jsons {
-			b, err := ioutil.ReadFile("json/"+x.Name())
+		for _, x := range jsons {
+			b, err := ioutil.ReadFile("json/" + x.Name())
 			if err != nil {
 				panic(err)
 			}
@@ -41,20 +53,15 @@ func main() {
 			generators[newGen.Name] = newGen
 		}
 	}
+	webserv()
 }
 
-func (g *Generator) Render(args... string) (image.Image, error) {
+func (g *Generator) Render(args []string) (image.Image, error) {
 
 	//Phase one: grab image
+
 	var i image.Image
 	{
-		//Find out extension
-		var ext string
-		if n := strings.Split(g.Name, "."); len(n) != 2 {
-			ext = n[1]
-		} else {
-			return nil, errors.New("Invalid generator file")
-		}
 		//Prepare file for reading
 		b, err := os.Open("images/" + g.Name)
 		if err != nil {
@@ -62,27 +69,41 @@ func (g *Generator) Render(args... string) (image.Image, error) {
 		}
 
 		//do it
-		switch ext {
-		case "jpeg", "jpg":
-			i, err = jpeg.Decode(b)
-			if err != nil {
-				return nil, err
-			}
-		case "png":
-			i, err = png.Decode(b)
-			//HOOEY I LOVE GOLANG'S BOILERPLATE FREE WRIVDSICOAS
-			if err != nil {
-				return nil, err
-			}
+		i, _, err = image.Decode(b)
+		if err != nil {
+			panic(err)
 		}
 	}
 
 	//Phase two: add labels
-	{
-		for x := range g.Labels {
-			if (len(args) - 1) < x {
 
+	for x := range g.Labels {
+
+			interf, found := cac.Get(g.Labels[x].FontFamily)
+			if !found {
+				file, err := os.Open("fonts/" + g.Labels[x].FontFamily + ".ttf")
+				if err != nil {
+					panic(err)
+				}
+				b, err := ioutil.ReadAll(file)
+				if err != nil {
+					panic(err)
+				}
+				interf, err = truetype.Parse(b)
+				if err != nil {
+					panic(err)
+				}
+				cac.Set(g.Labels[x].FontFamily, interf, cache.DefaultExpiration)
 			}
-		}
+			f := truetype.NewFace(interf.(*truetype.Font), &truetype.Options{Size: g.Labels[x].Size})
+			drawer := font.Drawer{
+				Dst:  i.(draw.Image),
+				Src:  image.NewUniform(g.Labels[x].Color),
+				Face: f,
+				Dot:  fixed.P(g.Labels[x].Point.X, g.Labels[x].Point.Y),
+			}
+			drawer.DrawString(args[x])
 	}
+
+	return i, nil
 }
