@@ -13,8 +13,6 @@ import (
 	"image/draw"
 	"image/color"
 	"golang.org/x/image/math/fixed"
-	"github.com/davecgh/go-spew/spew"
-	"log"
 )
 
 type Generator struct {
