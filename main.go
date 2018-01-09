@@ -61,7 +61,7 @@ func (g *Generator) Render(args []string) (image.Image, error) {
 	var i image.Image
 	{
 		//Prepare file for reading
-		b, err := os.Open("images/" + g.Name)
+		b, err := os.Open("images/" + g.Name + ".png")
 		if err != nil {
 			panic(err)
 		}
